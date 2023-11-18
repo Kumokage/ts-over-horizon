@@ -1,0 +1,15 @@
+name: ts-horizon
+channels:
+  - r
+  - conda-forge
+  - defaults
+dependencies:
+  # - r-imputets  # The InputeTS R package
+  - notebook                     
+  - ipywidgets                   
+  - pandas
+  - polars                       
+  - numpy                        
+  - matplotlib                   
+  - seaborn                      
+  - rpy2        # For using R packages in Python!
