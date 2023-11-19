@@ -5,11 +5,15 @@ channels:
   - defaults
 dependencies:
   # - r-imputets  # The InputeTS R package
-  - notebook                     
+  - notebook
+  - pylint                     
   - ipywidgets                   
   - pandas
   - polars                       
   - numpy                        
   - matplotlib                   
+  - scikit-learn
+  - scipy
+  - tqdm
   - seaborn                      
   - rpy2        # For using R packages in Python!
