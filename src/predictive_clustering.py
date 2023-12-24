@@ -1,6 +1,6 @@
 from sklearn.base import BaseEstimator
+from sklearn.cluster import DBSCAN
 from typing import Callable, Tuple, Optional
-from .wishart import Wishart
 from scipy import stats
 
 import itertools
@@ -10,12 +10,18 @@ import numpy as np
 import numpy.typing as npt
 from tqdm import tqdm
 
+from .utils import entropy
+from .wishart import Wishart
 
 class PredictiveClustering(BaseEstimator):
     def __init__(self, K: int, L: int, clustering = None,
                  distance_metric=(lambda x, y: np.linalg.norm(x-y, axis=1)), 
-                 choose_prediction: str = 'mode',
-                 eps: float = 5e-3, unpredicted_ratio: float = 3,
+                 choose_prediction: str = 'dbscan_mode',
+                 classify_point: str = 'dbscan',
+                 point_classifier = None,
+                 feature_extractor = None,
+                 entropy_max: float = 1.9,
+                 eps: float = 0.01, unpredicted_ratio: float = 0.,
                  healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None = None,
                  caching: bool = True, verbose: int = 0) -> None:
         """
@@ -54,11 +60,23 @@ class PredictiveClustering(BaseEstimator):
         self.clustering = clustering
         self.distance_metric = distance_metric
         self.choose_prediction = choose_prediction
+        self.classify_point = classify_point
+        self.point_classifier = point_classifier
+        self.feature_extractor = feature_extractor
         self.eps = eps
         self.unpredicted_ratio = unpredicted_ratio
         self.healing_method = healing_method
         self.caching = caching
         self.verbose = verbose
+        self.entropy_max = entropy_max
+
+        if self.classify_point == 'dbscan' and self.point_classifier is None:
+            self.point_classifier = DBSCAN(eps=0.005, min_samples=5)
+        
+        if self.classify_point == 'ml' and (self.point_classifier is None or self.feature_extractor is None):
+            # чет напечатать, что метод сменился, так как не подали обученный МЛ классифайер
+            self.classify_point = 'dbscan'
+            self.point_classifier = DBSCAN(eps=0.005, min_samples=5)
 
         self.motives = []
         self.generate_patterns()
@@ -132,6 +150,31 @@ class PredictiveClustering(BaseEstimator):
         if len(predictions) == 0:
             return np.nan
 
+        match self.classify_point:
+            case "dbscan":
+                self.point_classifier.fit(predictions.reshape(-1, 1))
+                labels = self.point_classifier.labels_
+                u_labels, counts = np.unique(
+                    labels[labels > -1], return_counts=True)
+
+                max_clusters = np.sort(counts)[-2:]
+                if (u_labels.size > 1 and max_clusters[1] / max_clusters[0] < self.unpredicted_ratio) or u_labels.size == 0:
+                    return np.nan
+            
+            case "entropy":
+                freqs, _ = np.histogram(predictions, bins = np.linspace(0,1,50))
+                probs = freqs / freqs.sum()
+                H = entropy(probs)
+
+                if H > self.entropy_max:
+                    return np.nan
+
+            case "boosting":
+                features = self.feature_extractor(predictions)
+                if self.point_classifier.predict(features):
+                    return np.nan
+
+
         match self.choose_prediction:
             case "mode":
                 return stats.mode(predictions, keepdims=True)[0]
@@ -140,19 +183,11 @@ class PredictiveClustering(BaseEstimator):
             case "wmean":
                 weights = distances / distances.sum()
                 return np.mean(weights*predictions)
-            case BaseEstimator():
-                self.choose_prediction.fit(predictions.reshape(-1, 1))
-                labels = self.choose_prediction.labels_
-                u_labels, counts = np.unique(
-                    labels[labels > -1], return_counts=True)
+            case "dbscan_mean":
+                return predictions[labels == u_labels[counts.argmax()]].mean()
+            case "dbscan_mode":
+                return predictions[labels == u_labels[counts.argmax()]].mean()
 
-                max_clusters = np.sort(counts)[-2:]
-                if (u_labels.size > 1 and
-                        max_clusters[1] / max_clusters[0] < self.unpredicted_ratio):
-                    return np.nan
-
-                if u_labels.size > 0:
-                    return predictions[labels == u_labels[counts.argmax()]].mean()
 
     def healing(self, X: npt.NDArray, predicted_points: npt.NDArray) -> npt.NDArray:
         match self.healing_method:

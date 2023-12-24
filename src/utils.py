@@ -27,3 +27,7 @@ def lorentz_ode(t, xyz, params):
     dz = x * y - β * z
 
     return np.array([dx, dy, dz])
+
+
+def entropy(p):
+    return -np.sum(np.log(p+10**(-13)) * p)
