@@ -1,5 +1,5 @@
 from sklearn.base import BaseEstimator
-from typing import Tuple, Optional
+from typing import Callable, Tuple, Optional
 from wishart import Wishart
 from scipy import stats
 
@@ -14,6 +14,7 @@ class PredictiveClustering(BaseEstimator):
                  distance_metric=(lambda x, y: np.linalg.norm(x-y, axis=1)), 
                  choose_prediction: str = 'mode',
                  eps: float = 5e-3, unpredicted_ratio: float = 3,
+                 healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None = None,
                  verbose: int = 0) -> None:
         """
             Parameters
@@ -37,6 +38,9 @@ class PredictiveClustering(BaseEstimator):
                 Ratio between two largest clusters for marking point 
                 not predictable. Only used when clustering approach used for 
                 choosing single prediction. Default value is 3.
+            healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None 
+                Healing approach that will be used in healing method or with 
+                predict if flag is provided. Default is None, no healing.
             verbose : int
                 Control how verbose logging should be. Default without logging.
         """
@@ -47,6 +51,7 @@ class PredictiveClustering(BaseEstimator):
         self.choose_prediction = choose_prediction
         self.eps = eps
         self.unpredicted_ratio = unpredicted_ratio
+        self.healing_method = healing_method
         self.verbose = verbose
 
         self.motives = []
@@ -143,11 +148,18 @@ class PredictiveClustering(BaseEstimator):
                 if u_labels.size > 0:
                     return predictions[labels == u_labels[counts.argmax()]].mean()
 
+    def healing(self, X: npt.NDArray, predicted_points: npt.NDArray) -> npt.NDArray:
+        match self.healing_method:
+            case Callable():
+                return self.healing_method(np.append(X, predicted_points)[predicted_points.shape[0]:])
+            case _:
+                return predicted_points
+
     def fit(self, X: npt.NDArray, y: Optional[npt.NDArray] = None) -> BaseEstimator:
         self.generate_motives(X)
         return self
 
-    def predict(self, X: npt.NDArray, prediction_range: int = 1) -> npt.NDArray:
+    def predict(self, X: npt.NDArray, prediction_range: int = 1, use_healing: bool = False) -> npt.NDArray:
         predicted_points = np.array([])
         iter_throw = (tqdm(range(prediction_range))
                       if self.verbose != 0 else range(prediction_range))
@@ -156,4 +168,9 @@ class PredictiveClustering(BaseEstimator):
                 np.append(X, predicted_points))
             prediction = self.choose_single_prediction(predictions, distances)
             predicted_points = np.append(predicted_points, np.array([prediction]))
-        return predicted_points
+
+        if use_healing:
+            predicted_points = self.healing(X, predicted_points)
+
+        return predicted_points 
+
