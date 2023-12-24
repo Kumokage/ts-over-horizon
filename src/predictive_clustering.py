@@ -1,5 +1,6 @@
 from sklearn.base import BaseEstimator
 from typing import Callable, Tuple, Optional
+from multiprocessing import Process, Pipe, cpu_count
 from .wishart import Wishart
 from scipy import stats
 
@@ -8,8 +9,17 @@ import os
 import pickle
 import numpy as np
 import numpy.typing as npt
+import math
 from tqdm import tqdm
 
+def transform(X: npt.NDArray, pattern: npt.NDArray) -> npt.NDArray:
+    N = len(X)
+    indexes = np.array([0, *np.cumsum(pattern)])
+    return_n = N-indexes[-1]
+    index_n = len(indexes)
+    indexes = np.repeat(indexes.reshape(1, index_n), return_n, axis=0)
+    indexes += np.repeat(np.arange(return_n), index_n).reshape((return_n, index_n))
+    return X[indexes]
 
 class PredictiveClustering(BaseEstimator):
     def __init__(self, K: int, L: int, clustering = None,
@@ -17,7 +27,8 @@ class PredictiveClustering(BaseEstimator):
                  choose_prediction: str = 'mode',
                  eps: float = 5e-3, unpredicted_ratio: float = 3,
                  healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None = None,
-                 caching: bool = True, verbose: int = 0) -> None:
+                 caching: bool = True, n_jobs: int = 1,
+                 verbose: int = 0) -> None:
         """
             Parameters
             ----------
@@ -46,6 +57,9 @@ class PredictiveClustering(BaseEstimator):
             caching: bool
                 Flag show if caching for motives should be used. Default is True. 
                 Cache is saved to .motives file.
+            n_jobs: int
+                Number of jobs for multiprocessing. Default value is 1. If value is -1,
+                use logical CPU cores number.
             verbose : int
                 Control how verbose logging should be. Default without logging.
         """
@@ -58,6 +72,7 @@ class PredictiveClustering(BaseEstimator):
         self.unpredicted_ratio = unpredicted_ratio
         self.healing_method = healing_method
         self.caching = caching
+        self.n_jobs = n_jobs if n_jobs > 0 else cpu_count()
         self.verbose = verbose
 
         self.motives = []
@@ -67,33 +82,29 @@ class PredictiveClustering(BaseEstimator):
         patterns = itertools.product(np.arange(1, self.K+1), repeat=self.L)
         self.patterns = np.array(list(patterns))
 
-    def transform(self, X: npt.NDArray, pattern: npt.NDArray) -> npt.NDArray:
-        N = len(X)
-        indexes = np.array([0, *np.cumsum(pattern)])
-        return_n = N-indexes[-1]
-        index_n = len(indexes)
-        indexes = np.repeat(indexes.reshape(1, index_n), return_n, axis=0)
-        indexes += np.repeat(np.arange(return_n),
-                             index_n).reshape((return_n, index_n))
-        return X[indexes]
 
-    def generate_motives(self, X: npt.NDArray) -> None:
-        iter_throw = (self.patterns
-                      if self.verbose == 0 else tqdm(self.patterns))
-        if self.clustering is None:
-            self.motives = []
+    @staticmethod
+    def _generate_motives(patterns: npt.NDArray, X: npt.NDArray, 
+                          transform, clustering=None,
+                          connector = None, verbose: int = 0) -> list:
+        iter_throw = (patterns
+                      if verbose == 0 else tqdm(patterns))
+        motives = []
+
+        if clustering is None:
             for pattern in iter_throw:
-                self.motives.append(self.transform(X, pattern))
-            return
+                motives.append(transform(X, pattern))
+            if connector:
+                connector.send(motives)
+            return motives
 
-        self.motives = []
         for pattern in iter_throw:
-            samples = self.transform(X, pattern)
-            self.clustering.fit(samples)
+            samples = transform(X, pattern)
+            clustering.fit(samples)
             centers = None
 
-            if type(self.clustering) is Wishart:
-                cluster_object = self.clustering.clusters_to_objects
+            if type(clustering) is Wishart:
+                cluster_object = clustering.clusters_to_objects
                 for label in range(len(cluster_object)):
                     cluster_elements = samples[cluster_object[label]]
 
@@ -104,10 +115,39 @@ class PredictiveClustering(BaseEstimator):
                     centers = (np.vstack((centers, center))
                                if centers is not None else center)
 
-                self.motives.append(centers)
+                motives.append(centers)
             else:
                 raise NotImplementedError(
-                    f"For now we don't support clustering by {type(self.clustering)}")
+                    f"For now we don't support clustering by {type(clustering)}")
+        if connector:
+            connector.send(motives)
+        return motives
+
+    def generate_motives(self, X: npt.NDArray):
+        if self.n_jobs == 1:
+            self.motives = self._generate_motives(
+                    self.patterns, X, transform, self.clustering, verbose=self.verbose)
+        else:
+            part_size = math.ceil(self.patterns.shape[0] / self.n_jobs)
+            conn_to, conn_from = Pipe()
+            processes = []
+            iter_throw = (range(0, self.patterns.shape[0], part_size)
+                          if self.verbose == 0
+                          else tqdm(range(0, self.patterns.shape[0], part_size)))
+            for i in iter_throw:
+                processes.append(
+                    Process(
+                        target=PredictiveClustering._generate_motives, 
+                        args=(self.patterns[i:i+part_size], X, transform, self.clustering, conn_from, 0, )
+                    )
+                )
+            
+            for process in processes:
+                process.start()
+
+            for process in processes:
+                self.motives.extend(conn_to.recv())
+
 
     def predict_set(self, X: npt.NDArray) -> Tuple[npt.NDArray, npt.NDArray]:
         predictions = []
