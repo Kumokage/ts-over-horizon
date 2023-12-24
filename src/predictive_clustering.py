@@ -1,6 +1,6 @@
 from sklearn.base import BaseEstimator
 from typing import Callable, Tuple, Optional
-from wishart import Wishart
+from .wishart import Wishart
 from scipy import stats
 
 import itertools
@@ -17,7 +17,7 @@ class PredictiveClustering(BaseEstimator):
                  choose_prediction: str = 'mode',
                  eps: float = 5e-3, unpredicted_ratio: float = 3,
                  healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None = None,
-                 cashing: bool = True, verbose: int = 0) -> None:
+                 caching: bool = True, verbose: int = 0) -> None:
         """
             Parameters
             ----------
@@ -43,7 +43,7 @@ class PredictiveClustering(BaseEstimator):
             healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None 
                 Healing approach that will be used in healing method or with 
                 predict if flag is provided. Default is None, no healing.
-            cashing: bool
+            caching: bool
                 Flag show if caching for motives should be used. Default is True. 
                 Cache is saved to .motives file.
             verbose : int
@@ -57,7 +57,7 @@ class PredictiveClustering(BaseEstimator):
         self.eps = eps
         self.unpredicted_ratio = unpredicted_ratio
         self.healing_method = healing_method
-        self.caching = cashing
+        self.caching = caching
         self.verbose = verbose
 
         self.motives = []
