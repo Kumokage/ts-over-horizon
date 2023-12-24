@@ -4,6 +4,8 @@ from wishart import Wishart
 from scipy import stats
 
 import itertools
+import os
+import pickle
 import numpy as np
 import numpy.typing as npt
 from tqdm import tqdm
@@ -15,7 +17,7 @@ class PredictiveClustering(BaseEstimator):
                  choose_prediction: str = 'mode',
                  eps: float = 5e-3, unpredicted_ratio: float = 3,
                  healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None = None,
-                 verbose: int = 0) -> None:
+                 cashing: bool = True, verbose: int = 0) -> None:
         """
             Parameters
             ----------
@@ -41,6 +43,9 @@ class PredictiveClustering(BaseEstimator):
             healing_method: str | Callable[[npt.NDArray], npt.NDArray] | None 
                 Healing approach that will be used in healing method or with 
                 predict if flag is provided. Default is None, no healing.
+            cashing: bool
+                Flag show if caching for motives should be used. Default is True. 
+                Cache is saved to .motives file.
             verbose : int
                 Control how verbose logging should be. Default without logging.
         """
@@ -52,6 +57,7 @@ class PredictiveClustering(BaseEstimator):
         self.eps = eps
         self.unpredicted_ratio = unpredicted_ratio
         self.healing_method = healing_method
+        self.caching = cashing
         self.verbose = verbose
 
         self.motives = []
@@ -155,8 +161,17 @@ class PredictiveClustering(BaseEstimator):
             case _:
                 return predicted_points
 
-    def fit(self, X: npt.NDArray, y: Optional[npt.NDArray] = None) -> BaseEstimator:
-        self.generate_motives(X)
+    def fit(self, X: npt.NDArray, y: Optional[npt.NDArray] = None, rewrite_cache: bool = False) -> BaseEstimator:
+        if self.caching:
+            if os.path.isfile(".motives") and not rewrite_cache:
+                with open(".motives", 'rb') as f:
+                    self.motives = pickle.load(f)
+            else:
+                self.generate_motives(X)
+                with open(".motives", 'wb') as f:
+                    pickle.dump(self.motives, f)
+        else:
+            self.generate_motives(X)
         return self
 
     def predict(self, X: npt.NDArray, prediction_range: int = 1, use_healing: bool = False) -> npt.NDArray:
