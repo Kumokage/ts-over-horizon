@@ -1,8 +1,9 @@
 import numpy as np
+
 from scipy.special import gamma
 from sklearn.neighbors import KDTree
 from collections import defaultdict
-from tqdm import tqdm
+
 
 class Wishart:
     def __init__(self, wishart_neighbors, significance_level):
@@ -14,30 +15,30 @@ class Wishart:
         from sklearn.neighbors import KDTree
         kdt = KDTree(X, metric='euclidean')
 
-        #add one because you are your neighb.
-        distances, neighbors = kdt.query(X, k = self.wishart_neighbors + 1, return_distance = True)
+        # add one because you are your neighb.
+        distances, neighbors = kdt.query(
+            X, k=self.wishart_neighbors + 1, return_distance=True)
         neighbors = neighbors[:, 1:]
-
 
         distances = distances[:, -1]
         indexes = np.argsort(distances)
-        
+
         size, dim = X.shape
 
-        self.object_labels = np.zeros(size, dtype = int) - 1
+        self.object_labels = np.zeros(size, dtype=int) - 1
 
-        #index in tuple
-        #min_dist, max_dist, flag_to_significant
+        # index in tuple
+        # min_dist, max_dist, flag_to_significant
         self.clusters = np.array([(1., 1., 0)])
         self.clusters_to_objects = defaultdict(list)
         # print('Start clustering')
 
         for index in indexes:
             neighbors_clusters =\
-                np.concatenate([self.object_labels[neighbors[index]], self.object_labels[neighbors[index]]])
+                np.concatenate([self.object_labels[neighbors[index]],
+                               self.object_labels[neighbors[index]]])
             unique_clusters = np.unique(neighbors_clusters).astype(int)
             unique_clusters = unique_clusters[unique_clusters != -1]
-
 
             if len(unique_clusters) == 0:
                 self._create_new_cluster(index, distances[index])
@@ -46,7 +47,8 @@ class Wishart:
                 min_cluster = unique_clusters[0]
                 if max_cluster == min_cluster:
                     if self.clusters[max_cluster][-1] < 0.5:
-                        self._add_elem_to_exist_cluster(index, distances[index], max_cluster)
+                        self._add_elem_to_exist_cluster(
+                            index, distances[index], max_cluster)
                     else:
                         self._add_elem_to_noise(index)
                 else:
@@ -55,7 +57,8 @@ class Wishart:
                     if np.min(flags) > 0.5:
                         self._add_elem_to_noise(index)
                     else:
-                        significan = np.power(my_clusters[:, 0], -dim) - np.power(my_clusters[:, 1], -dim)
+                        significan = np.power(
+                            my_clusters[:, 0], -dim) - np.power(my_clusters[:, 1], -dim)
                         significan *= self.wishart_neighbors
                         significan /= size
                         significan /= np.power(np.pi, dim / 2)
@@ -74,35 +77,40 @@ class Wishart:
 
                                 for bad_index in self.clusters_to_objects[not_sig_cluster]:
                                     self._add_elem_to_noise(bad_index)
-                                self.clusters_to_objects[not_sig_cluster].clear()
+                                self.clusters_to_objects[not_sig_cluster].clear(
+                                )
                         else:
                             for cur_cluster in unique_clusters:
                                 if cur_cluster == min_cluster:
                                     continue
 
                                 for bad_index in self.clusters_to_objects[cur_cluster]:
-                                    self._add_elem_to_exist_cluster(bad_index, distances[bad_index], min_cluster)
+                                    self._add_elem_to_exist_cluster(
+                                        bad_index, distances[bad_index],
+                                        min_cluster)
                                 self.clusters_to_objects[cur_cluster].clear()
 
-                            self._add_elem_to_exist_cluster(index, distances[index], min_cluster)
+                            self._add_elem_to_exist_cluster(
+                                index, distances[index], min_cluster)
 
         return self.clean_data()
-    
+
     def find_center(self, cluster):
         X_cluster = self.X[cluster]
         kdt = KDTree(X_cluster, metric='euclidean')
-        distances, neighbors = kdt.query(X_cluster, k = self.wishart_neighbors + 1, return_distance = True)
+        distances, neighbors = kdt.query(
+            X_cluster, k=self.wishart_neighbors + 1, return_distance=True)
         distances = distances[:, -1]
         index_center = np.argsort(distances)[0]
         return X_cluster[index_center]
-        
+
     def clean_data(self):
         unique = np.unique(self.object_labels)
         index = np.argsort(unique)
         if unique[0] != 0:
             index += 1
-        true_cluster = {unq :  index for unq, index in zip(unique, index)}
-        result = np.zeros(len(self.object_labels), dtype = int)
+        true_cluster = {unq:  index for unq, index in zip(unique, index)}
+        result = np.zeros(len(self.object_labels), dtype=int)
         for index, unq in enumerate(self.object_labels):
             result[index] = true_cluster[unq]
         return result
@@ -114,39 +122,12 @@ class Wishart:
     def _create_new_cluster(self, index, dist):
         self.object_labels[index] = len(self.clusters)
         self.clusters_to_objects[len(self.clusters)].append(index)
-        self.clusters = np.append(self.clusters, [(dist, dist, 0)], axis = 0)
+        self.clusters = np.append(self.clusters, [(dist, dist, 0)], axis=0)
 
     def _add_elem_to_exist_cluster(self, index, dist, cluster_label):
         self.object_labels[index] = cluster_label
         self.clusters_to_objects[cluster_label].append(index)
-        self.clusters[cluster_label][0] = min(self.clusters[cluster_label][0], dist)
-        self.clusters[cluster_label][1] = max(self.clusters[cluster_label][1], dist)
-        
-        
-def runge_kutta(time_steps, y0, system, params):
-    ys = [y0]
-    for t in range(len(time_steps)-1):
-        dt = time_steps[t+1]-time_steps[t]
-        t0 = time_steps[t]
-        t1 = time_steps[t+1]
-        k1 = system(t0, y0, params)
-        k2 = system(t0 + dt/2, y0 + dt / 2 * k1, params)
-        k3 = system(t0 + dt/2, y0 + dt / 2 * k2, params)
-        k4 = system(t1, y0 + dt * k3, params)
-        y0  = y0 + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-        ys.append(y0)
-    return np.array(ys)
-
-
-def lorentz_ode(t, xyz, params):
-    x, y, z = xyz
-    σ = params['σ']
-    ρ = params['ρ']
-    β = params['β']
-    
-    dx = σ * (y - x)
-    dy = x * (ρ - z) - y
-    dz = x * y - β * z
-    
-    return np.array([dx, dy, dz])
-
+        self.clusters[cluster_label][0] = min(
+            self.clusters[cluster_label][0], dist)
+        self.clusters[cluster_label][1] = max(
+            self.clusters[cluster_label][1], dist)
