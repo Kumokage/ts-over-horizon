@@ -150,14 +150,15 @@ class PredictiveClustering(BaseEstimator):
         if len(predictions) == 0:
             return np.nan
 
+        self.point_classifier.fit(predictions.reshape(-1, 1))
+        labels = self.point_classifier.labels_
+        u_labels, counts = np.unique(
+                labels[labels > -1], return_counts=True)
+
+        max_clusters = np.sort(counts)[-2:]
+
         match self.classify_point:
             case "dbscan":
-                self.point_classifier.fit(predictions.reshape(-1, 1))
-                labels = self.point_classifier.labels_
-                u_labels, counts = np.unique(
-                    labels[labels > -1], return_counts=True)
-
-                max_clusters = np.sort(counts)[-2:]
                 if (u_labels.size > 1 and max_clusters[1] / max_clusters[0] < self.unpredicted_ratio) or u_labels.size == 0:
                     return np.nan
             
